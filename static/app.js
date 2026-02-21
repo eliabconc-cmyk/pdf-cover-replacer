@@ -124,7 +124,7 @@ function renderSubjectCard(subj) {
                     '</div>' +
                     '<input type="file" id="cover-input-' + subj.id + '" accept=".pdf,.png,.jpg,.jpeg" hidden>' +
                 '</div>' +
-                '<div class="file-selected" id="cover-info-' + subj.id + '" hidden>' +
+                '<div class="file-selected" id="cover-info-' + subj.id + '" style="display:none">' +
                     '<div class="file-selected-inner">' +
                         '<div class="file-selected-icon">' +
                             '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
@@ -164,7 +164,7 @@ function renderSubjectCard(subj) {
                 '</div>' +
                 '<div class="pdf-list-wrap">' +
                     '<ul class="file-list" id="pdfs-list-' + subj.id + '"></ul>' +
-                    '<div class="file-count" id="pdfs-count-' + subj.id + '" hidden>' +
+                    '<div class="file-count" id="pdfs-count-' + subj.id + '" style="display:none">' +
                         '<span id="pdfs-count-text-' + subj.id + '"></span>' +
                     '</div>' +
                 '</div>' +
@@ -199,7 +199,7 @@ function renderSubjectCard(subj) {
             if (!s) return;
             s.coverFile = files[0];
             coverNameEl.textContent = files[0].name + ' \u00B7 ' + formatSize(files[0].size);
-            coverInfo.hidden = false;
+            coverInfo.style.display = '';
             coverDz.style.display = 'none';
             updateProcessButton();
         }
@@ -209,7 +209,7 @@ function renderSubjectCard(subj) {
         e.stopPropagation();
         var s = getSubject(subj.id);
         if (s) s.coverFile = null;
-        coverInfo.hidden = true;
+        coverInfo.style.display = 'none';
         coverDz.style.display = '';
         updateProcessButton();
     });
@@ -259,11 +259,11 @@ function renderSubjectPdfList(subjId) {
     });
 
     if (s.pdfFiles.length > 0) {
-        countEl.hidden = false;
+        countEl.style.display = '';
         var totalSize = s.pdfFiles.reduce(function(sum, f) { return sum + f.size; }, 0);
         countText.textContent = s.pdfFiles.length + ' arquivo' + (s.pdfFiles.length > 1 ? 's' : '') + ' \u00B7 ' + formatSize(totalSize);
     } else {
-        countEl.hidden = true;
+        countEl.style.display = 'none';
     }
 }
 
@@ -324,9 +324,9 @@ function processFiles() {
         });
     });
 
-    stepProcess.hidden = true;
+    stepProcess.style.display = 'none';
     subjectsSection.style.display = 'none';
-    stepProgress.hidden = false;
+    stepProgress.style.display = '';
     setProgress(0, 'Enviando arquivos...');
     setStatus('Processando...');
 
@@ -362,9 +362,9 @@ function processFiles() {
             var msg = 'Erro no processamento';
             try { msg = JSON.parse(xhr.responseText).error; } catch (e) {}
             setProgress(0, msg);
-            stepProgress.hidden = true;
+            stepProgress.style.display = 'none';
             subjectsSection.style.display = '';
-            stepProcess.hidden = false;
+            stepProcess.style.display = '';
             setStatus('Erro');
         }
     });
@@ -372,9 +372,9 @@ function processFiles() {
     xhr.addEventListener('error', function() {
         if (pulseInterval) clearInterval(pulseInterval);
         setProgress(0, 'Erro de rede');
-        stepProgress.hidden = true;
+        stepProgress.style.display = 'none';
         subjectsSection.style.display = '';
-        stepProcess.hidden = false;
+        stepProcess.style.display = '';
         setStatus('Erro');
     });
 
@@ -390,8 +390,8 @@ function setProgress(pct, text) {
 
 // ===== Results =====
 function showResults(result) {
-    stepProgress.hidden = true;
-    stepResults.hidden = false;
+    stepProgress.style.display = 'none';
+    stepResults.style.display = '';
 
     var totalSucceeded = 0;
     var totalFailed = 0;
@@ -520,9 +520,9 @@ resetBtn.addEventListener('click', function() {
 
     subjectsList.innerHTML = '';
     subjectsSection.style.display = '';
-    stepResults.hidden = true;
-    stepProcess.hidden = false;
-    stepProgress.hidden = true;
+    stepResults.style.display = 'none';
+    stepProcess.style.display = '';
+    stepProgress.style.display = 'none';
     processBtn.disabled = true;
     resultsBySubject.innerHTML = '';
     setStatus('Pronto');
