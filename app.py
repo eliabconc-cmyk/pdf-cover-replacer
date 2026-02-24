@@ -1,4 +1,5 @@
 import os
+import gc
 import uuid
 import shutil
 import zipfile
@@ -6,8 +7,9 @@ import io
 import time
 import threading
 import re
+import logging
 
-from flask import Flask, request, jsonify, send_file, render_template
+from flask import Flask, request, jsonify, send_file, render_template, Response
 from werkzeug.utils import secure_filename
 
 from cover_replacer import (
@@ -16,8 +18,11 @@ from cover_replacer import (
     is_valid_pdf, is_valid_image
 )
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
-app.config['MAX_CONTENT_LENGTH'] = 1 * 1024 * 1024 * 1024  # 1 GB
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 200 MB (adequado para 512 MB RAM)
 
 UPLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -28,13 +33,17 @@ UUID_RE = re.compile(r'^[a-f0-9\-]{36}$')
 _last_cleanup = 0
 
 
-def cleanup_old_sessions(max_age=3600):
+def cleanup_old_sessions(max_age=1800):
     if not os.path.exists(UPLOAD_DIR):
         return
     now = time.time()
+    cleaned = 0
     for entry in os.scandir(UPLOAD_DIR):
         if entry.is_dir() and (now - entry.stat().st_mtime) > max_age:
             shutil.rmtree(entry.path, ignore_errors=True)
+            cleaned += 1
+    if cleaned > 0:
+        logger.info(f"Limpeza: {cleaned} sessoes removidas")
 
 
 @app.before_request
@@ -194,13 +203,23 @@ def process():
                     subj_result["failed"] += 1
                     subj_result["errors"].append({"filename": fname, "error": str(e)})
 
+                # Libera memoria a cada PDF processado
+                gc.collect()
+
             cover_doc.close()
+            del cover_doc
+            gc.collect()
+
+            # Remove arquivos de input apos processar (libera disco)
+            shutil.rmtree(subj_input_dir, ignore_errors=True)
+
             results["subjects"].append(subj_result)
 
         return jsonify(results)
 
     except Exception as e:
         shutil.rmtree(session_dir, ignore_errors=True)
+        logger.error(f"Erro no processamento: {e}")
         return jsonify({"error": f"Erro no processamento: {str(e)}"}), 500
 
 
@@ -219,6 +238,19 @@ def download_single(session_id, subject_dir, filename):
     return send_file(filepath, as_attachment=True, download_name=filename)
 
 
+def _stream_zip(paths_and_names):
+    """Gera ZIP em streaming usando arquivo temporario em disco em vez de RAM."""
+    import tempfile
+
+    tmp = tempfile.SpooledTemporaryFile(max_size=5 * 1024 * 1024)  # 5 MB em RAM, depois vai para disco
+    with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for filepath, arcname in paths_and_names:
+            zf.write(filepath, arcname)
+
+    tmp.seek(0)
+    return tmp
+
+
 @app.route('/api/download-subject/<session_id>/<subject_dir>')
 def download_subject(session_id, subject_dir):
     if not UUID_RE.match(session_id):
@@ -229,15 +261,14 @@ def download_subject(session_id, subject_dir):
     if not os.path.isdir(subj_output):
         return jsonify({"error": "Materia nao encontrada"}), 404
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for fname in os.listdir(subj_output):
-            filepath = os.path.join(subj_output, fname)
-            if os.path.isfile(filepath):
-                zf.write(filepath, fname)
+    paths = []
+    for fname in os.listdir(subj_output):
+        filepath = os.path.join(subj_output, fname)
+        if os.path.isfile(filepath):
+            paths.append((filepath, fname))
 
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=True,
+    tmp = _stream_zip(paths)
+    return send_file(tmp, as_attachment=True,
                      download_name=f'{subject_dir}.zip',
                      mimetype='application/zip')
 
@@ -251,18 +282,17 @@ def download_all(session_id):
     if not os.path.isdir(output_dir):
         return jsonify({"error": "Sessao nao encontrada"}), 404
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
-        for subj_dir in os.listdir(output_dir):
-            subj_path = os.path.join(output_dir, subj_dir)
-            if os.path.isdir(subj_path):
-                for fname in os.listdir(subj_path):
-                    filepath = os.path.join(subj_path, fname)
-                    if os.path.isfile(filepath):
-                        zf.write(filepath, os.path.join(subj_dir, fname))
+    paths = []
+    for subj_dir in os.listdir(output_dir):
+        subj_path = os.path.join(output_dir, subj_dir)
+        if os.path.isdir(subj_path):
+            for fname in os.listdir(subj_path):
+                filepath = os.path.join(subj_path, fname)
+                if os.path.isfile(filepath):
+                    paths.append((filepath, os.path.join(subj_dir, fname)))
 
-    buffer.seek(0)
-    return send_file(buffer, as_attachment=True,
+    tmp = _stream_zip(paths)
+    return send_file(tmp, as_attachment=True,
                      download_name='pdfs_por_materia.zip',
                      mimetype='application/zip')
 
@@ -281,7 +311,7 @@ def cleanup(session_id):
 
 @app.errorhandler(413)
 def too_large(e):
-    return jsonify({"error": "Arquivo muito grande. Maximo total: 1 GB."}), 413
+    return jsonify({"error": "Arquivo muito grande. Maximo total: 200 MB."}), 413
 
 
 if __name__ == '__main__':

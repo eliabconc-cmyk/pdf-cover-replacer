@@ -1,3 +1,4 @@
+import gc
 import fitz
 from PIL import Image
 
@@ -26,6 +27,7 @@ def get_first_page_dimensions(pdf_path: str) -> tuple[float, float]:
     page = doc[0]
     w, h = page.rect.width, page.rect.height
     doc.close()
+    del page, doc
     return w, h
 
 
@@ -55,14 +57,22 @@ def replace_first_page(target_path: str, cover_doc: fitz.Document, output_path: 
     target_w = target_doc[0].rect.width
     target_h = target_doc[0].rect.height
 
-    # Se a capa é imagem e o PDF tem dimensões diferentes, recria a capa
+    resized_cover = None
+    active_cover = cover_doc
+
     if cover_is_image and image_path:
         cover_w = cover_doc[0].rect.width
         cover_h = cover_doc[0].rect.height
         if abs(cover_w - target_w) > 1 or abs(cover_h - target_h) > 1:
-            cover_doc = load_cover_from_image(image_path, target_w, target_h)
+            resized_cover = load_cover_from_image(image_path, target_w, target_h)
+            active_cover = resized_cover
 
     target_doc.delete_page(0)
-    target_doc.insert_pdf(cover_doc, from_page=0, to_page=0, start_at=0)
+    target_doc.insert_pdf(active_cover, from_page=0, to_page=0, start_at=0)
     target_doc.save(output_path)
     target_doc.close()
+    del target_doc
+
+    if resized_cover is not None:
+        resized_cover.close()
+        del resized_cover
